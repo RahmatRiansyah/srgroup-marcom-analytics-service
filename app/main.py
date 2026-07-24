@@ -41,7 +41,20 @@ def get_trends(
         default=None, description="Kata kunci pencarian, contoh: 'diskon lebaran'"
     ),
     limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(
+        default=30,
+        ge=1,
+        le=365,
+        description=(
+            "Batasi hasil hanya postingan yang di-scrape dalam N hari terakhir. "
+            "Ini SENGAJA jadi default (bukan opsional) supaya endpoint ini tidak pernah "
+            "mengembalikan data lama (mis. hasil scraping 3 bulan lalu) yang bisa disalahartikan "
+            "sebagai tren yang sedang terjadi sekarang. Perbesar nilainya kalau memang butuh histori lebih jauh."
+        ),
+    ),
 ):
+    since = datetime.now() - timedelta(days=days)
+
     if keyword:
         like = f"%{keyword}%"
         rows = fetch_all(
@@ -51,11 +64,12 @@ def get_trends(
                 ts.name AS source_name, ts.platform AS source_platform
             FROM trend_posts tp
             JOIN trend_sources ts ON ts.id = tp.trend_source_id
-            WHERE tp.title LIKE %s OR tp.content LIKE %s OR ts.name LIKE %s
+            WHERE (tp.title LIKE %s OR tp.content LIKE %s OR ts.name LIKE %s)
+              AND tp.created_at >= %s
             ORDER BY tp.created_at DESC
             LIMIT %s
             """,
-            (like, like, like, limit),
+            (like, like, like, since, limit),
         )
     else:
         rows = fetch_all(
@@ -65,15 +79,28 @@ def get_trends(
                 ts.name AS source_name, ts.platform AS source_platform
             FROM trend_posts tp
             JOIN trend_sources ts ON ts.id = tp.trend_source_id
+            WHERE tp.created_at >= %s
             ORDER BY tp.created_at DESC
             LIMIT %s
             """,
-            (limit,),
+            (since, limit),
         )
+
+    # Metadata kesegaran data: seberapa baru postingan TERBARU yang ditemukan,
+    # supaya chatbot/LLM bisa bilang eksplisit ke user seberapa update datanya
+    # (mis. "data terbaru dari 2 hari lalu"), alih-alih diam-diam menyajikan
+    # data basi seolah itu kondisi sekarang.
+    newest_post_at = rows[0]["created_at"] if rows else None
+    newest_post_age_days = (
+        (datetime.now() - newest_post_at).days if newest_post_at else None
+    )
 
     return {
         "keyword": keyword,
+        "days": days,
         "count": len(rows),
+        "newest_post_at": newest_post_at,
+        "newest_post_age_days": newest_post_age_days,
         "results": rows,
     }
 
@@ -119,8 +146,18 @@ def get_competitor(nama: str, limit: int = Query(default=10, ge=1, le=50)):
         (source["id"], limit),
     )
 
+    # Sama seperti /trends: sertakan kesegaran data eksplisit, supaya kalau
+    # postingan terbaru kompetitor ini ternyata sudah lama, chatbot bisa
+    # bilang jujur ke user alih-alih menyajikannya seolah aktivitas terkini.
+    newest_post_at = posts[0]["created_at"] if posts else None
+    newest_post_age_days = (
+        (datetime.now() - newest_post_at).days if newest_post_at else None
+    )
+
     return {
         "source": source,
+        "newest_post_at": newest_post_at,
+        "newest_post_age_days": newest_post_age_days,
         "recent_posts": posts,
     }
 
