@@ -6,6 +6,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Chromium headless + library OS yang dibutuhkannya (untuk headless_scraper.py
+# yang scraping Instagram/TikTok). --with-deps otomatis install dependency
+# sistem (fonts, libnss3, dll) lewat apt, jadi image tetap bisa jalan di
+# base image slim tanpa perlu daftar paket manual satu-satu.
+RUN playwright install --with-deps chromium
+
 COPY . .
 
 ENV PYTHONUNBUFFERED=1

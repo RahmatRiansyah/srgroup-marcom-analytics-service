@@ -7,6 +7,13 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from app.auth import verify_api_key
 from app.db import fetch_all, fetch_one
 from app.google_trends import get_live_trend
+from app.meta_insights import (
+    MetaApiError,
+    MetaConfigError,
+    get_engagement_summary,
+    get_recent_meta_posts,
+    sync_meta_account,
+)
 from scraper import run_scraper
 
 load_dotenv()
@@ -235,3 +242,46 @@ def trigger_scrape():
         "failed": failed,
         "results": results,
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /meta/sync
+# Tarik data TERBARU dari Meta Graph API (akun Instagram Business/Creator
+# milik SR Group sendiri -- BUKAN kompetitor, lihat app/meta_insights.py)
+# dan simpan/update ke tabel meta_posts & meta_account_snapshots.
+#
+# Dipanggil oleh scheduler Laravel (php artisan meta:sync) tiap beberapa
+# menit untuk simulasikan "real-time", dan bisa juga dipanggil manual dari
+# tombol "Sync Sekarang" di admin panel.
+# ---------------------------------------------------------------------------
+@app.post("/meta/sync", dependencies=[Depends(verify_api_key)])
+def trigger_meta_sync(limit: int = Query(default=25, ge=1, le=100)):
+    try:
+        result = sync_meta_account(limit=limit)
+        return {"status": "success", **result}
+    except MetaConfigError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except MetaApiError as e:
+        raise HTTPException(status_code=502, detail=f"Meta Graph API error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# GET /meta/engagement/summary?days=7
+# Ringkasan engagement akun Meta sendiri dalam N hari terakhir: rata-rata
+# engagement rate, post terbaik, dan kesegaran data (data_age_minutes) --
+# dibaca dari DB lokal (hasil sync terakhir), BUKAN hit Graph API langsung,
+# supaya cepat & tidak boros rate limit Meta. Dipakai chatbot & dashboard.
+# ---------------------------------------------------------------------------
+@app.get("/meta/engagement/summary", dependencies=[Depends(verify_api_key)])
+def get_meta_engagement_summary(days: int = Query(default=7, ge=1, le=90)):
+    return get_engagement_summary(days=days)
+
+
+# ---------------------------------------------------------------------------
+# GET /meta/posts?limit=10
+# Daftar post terbaru akun Meta sendiri beserta angka engagement-nya,
+# dibaca dari DB lokal (hasil sync terakhir).
+# ---------------------------------------------------------------------------
+@app.get("/meta/posts", dependencies=[Depends(verify_api_key)])
+def get_meta_posts(limit: int = Query(default=10, ge=1, le=50)):
+    return {"results": get_recent_meta_posts(limit=limit)}

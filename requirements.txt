@@ -30,3 +30,9 @@ uvicorn==0.51.0
 # Ditambahkan: dipakai oleh scraper.py tapi belum ada di requirements asli
 mysql-connector-python>=9.0,<10.0
 beautifulsoup4>=4.12,<5.0
+
+# Ditambahkan: headless browser (Chromium) untuk scraping Instagram/TikTok --
+# platform ini merender konten lewat JavaScript & aktif mendeteksi bot, jadi
+# requests+BeautifulSoup biasa (dipakai untuk Website/target statis) tidak
+# cukup. Lihat headless_scraper.py.
+playwright>=1.48,<2.0
