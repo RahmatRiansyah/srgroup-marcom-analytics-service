@@ -3,6 +3,9 @@ from contextlib import contextmanager
 
 import mysql.connector
 from mysql.connector import Error as MySQLError
+from mysql.connector.pooling import MySQLConnectionPool
+
+_pool: MySQLConnectionPool | None = None
 
 
 def get_db_config() -> dict:
@@ -20,18 +23,38 @@ def get_db_config() -> dict:
     }
 
 
+def _get_pool() -> MySQLConnectionPool:
+    """Buat connection pool sekali saja (lazy singleton), dipakai ulang di
+    semua request. Sebelumnya tiap fetch_all/fetch_one buka koneksi TCP baru
+    ke MySQL dan menutupnya lagi -- boros & jadi bottleneck pertama begitu
+    traffic naik. Ukuran pool diatur lewat DB_POOL_SIZE (default 5), samakan
+    dengan jumlah worker Uvicorn supaya tidak saling rebutan/timeout.
+    """
+    global _pool
+    if _pool is None:
+        pool_size = int(os.getenv("DB_POOL_SIZE", "5"))
+        _pool = MySQLConnectionPool(
+            pool_name="srgroup_analytics_pool",
+            pool_size=pool_size,
+            pool_reset_session=True,
+            **get_db_config(),
+        )
+    return _pool
+
+
 @contextmanager
 def get_connection():
-    """Context manager supaya koneksi selalu ditutup meskipun terjadi error."""
+    """Context manager: pinjam koneksi dari pool, otomatis dikembalikan
+    (bukan ditutup permanen) begitu selesai dipakai."""
     conn = None
     try:
-        conn = mysql.connector.connect(**get_db_config())
+        conn = _get_pool().get_connection()
         yield conn
     except MySQLError as e:
         raise RuntimeError(f"Gagal konek ke database: {e}") from e
     finally:
         if conn is not None and conn.is_connected():
-            conn.close()
+            conn.close()  # mengembalikan koneksi ke pool, bukan menutup TCP-nya
 
 
 def fetch_all(query: str, params: tuple = ()) -> list[dict]:

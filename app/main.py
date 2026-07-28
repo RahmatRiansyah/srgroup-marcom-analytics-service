@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -18,6 +19,12 @@ from scraper import run_scraper
 
 load_dotenv()
 
+# Default AMAN: dokumentasi (/docs, /redoc, /openapi.json) hanya aktif kalau
+# APP_ENV secara eksplisit diset ke "local"/"development". Kalau env var ini
+# belum diset sama sekali (mis. lupa dikonfigurasi saat deploy), service
+# tetap fallback ke mode "tersembunyi" -- bukan malah kebuka ke publik.
+_is_local_env = os.getenv("APP_ENV", "production").lower() in ("local", "development", "dev")
+
 app = FastAPI(
     title="SRGroup Marcom Analytics Service",
     description=(
@@ -26,6 +33,9 @@ app = FastAPI(
         "X-API-Key."
     ),
     version="0.1.0",
+    docs_url="/docs" if _is_local_env else None,
+    redoc_url="/redoc" if _is_local_env else None,
+    openapi_url="/openapi.json" if _is_local_env else None,
 )
 
 
